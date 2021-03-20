@@ -17,7 +17,7 @@ import de.ganskef.test.TrustedServer;
 
 // https://github.com/adamfisk/LittleProxy/pull/210
 // https://github.com/adamfisk/LittleProxy/issues/207
-public class HostNameVerificationTest {
+public class HostNameVerificationTest extends BaseTest {
 
     private static final String IMAGE_PATH = "src/test/resources/www/netty-in-action.gif";
 

@@ -3,6 +3,7 @@ package de.ganskef.test;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 
@@ -20,8 +21,7 @@ public class TrustedClient extends Client implements IClient {
 
     protected SSLContext initSslContext() throws GeneralSecurityException,
             IOException {
-        FileInputStream is = new FileInputStream(new File(
-                "littleproxy-mitm.p12"));
+        FileInputStream is = new FileInputStream("littleproxy-mitm.p12");
         KeyStore ks = KeyStore.getInstance("PKCS12");
         ks.load(is, "Be Your Own Lantern".toCharArray());
         is.close();
@@ -34,10 +34,10 @@ public class TrustedClient extends Client implements IClient {
 
     public static void main(String[] args) throws Exception {
         File trusted = new TrustedClient().get("https://localhost:8083");
-        System.out.println(FileUtils.readFileToString(trusted));
+        System.out.println(FileUtils.readFileToString(trusted, StandardCharsets.US_ASCII));
         File online = new TrustedClient()
                 .get("https://www.google.com/humans.txt");
-        System.out.println(FileUtils.readFileToString(online));
+        System.out.println(FileUtils.readFileToString(online, StandardCharsets.US_ASCII));
     }
 
 }

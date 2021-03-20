@@ -1,25 +1,9 @@
 package org.littleshoot.proxy.mitm;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.math.BigInteger;
-import java.security.InvalidKeyException;
-import java.security.Key;
-import java.security.KeyManagementException;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
-import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.SecureRandom;
-import java.security.Security;
-import java.security.SignatureException;
-import java.security.UnrecoverableKeyException;
+import java.security.*;
 import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Date;
 import java.util.Random;
@@ -28,9 +12,7 @@ import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
 
-import org.apache.commons.io.IOUtils;
 import org.bouncycastle.asn1.ASN1EncodableVector;
 import org.bouncycastle.asn1.ASN1InputStream;
 import org.bouncycastle.asn1.ASN1Sequence;
@@ -51,7 +33,6 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentSigner;
-import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,28 +41,15 @@ public final class CertificateHelper {
 
     private static final Logger log = LoggerFactory.getLogger(CertificateHelper.class);
 
-    public static final String PROVIDER_NAME = BouncyCastleProvider.PROVIDER_NAME;
-
-    static {
-        Security.addProvider(new BouncyCastleProvider());
-    }
+    public static final Provider BC_PROVIDER = new BouncyCastleProvider();
 
     private static final String KEYGEN_ALGORITHM = "RSA";
 
-    private static final String SECURE_RANDOM_ALGORITHM = "SHA1PRNG";
-
-    /**
-     * The signature algorithm starting with the message digest to use when
-     * signing certificates. On 64-bit systems this should be set to SHA512, on
-     * 32-bit systems this is SHA256. On 64-bit systems, SHA512 generally
-     * performs better than SHA256; see this question for details:
-     * http://crypto.stackexchange.com/questions/26336/sha512-faster-than-sha256
-     */
-    private static final String SIGNATURE_ALGORITHM = (is32BitJvm() ? "SHA256" : "SHA512") + "WithRSAEncryption";
+    private static final String SIGNATURE_ALGORITHM = "SHA256WithRSAEncryption";
 
     private static final int ROOT_KEYSIZE = 2048;
 
-    private static final int FAKE_KEYSIZE = 1024;
+    private static final int FAKE_KEYSIZE = 2048;
 
     /** The milliseconds of a day */
     private static final long ONE_DAY = 86400000L;
@@ -101,215 +69,206 @@ public final class CertificateHelper {
      */
     private static final Date NOT_AFTER = new Date(System.currentTimeMillis() + ONE_DAY * 365 * 100);
 
-    /**
-     * Enforce TLS 1.2 if available, since it's not default up to Java 8.
-     * <p>
-     * Java 7 disables TLS 1.1 and 1.2 for clients. From <a href=
-     * "http://docs.oracle.com/javase/7/docs/technotes/guides/security/SunProviders.html"
-     * >Java Cryptography Architecture Oracle Providers Documentation:</a>
-     * Although SunJSSE in the Java SE 7 release supports TLS 1.1 and TLS 1.2,
-     * neither version is enabled by default for client connections. Some
-     * servers do not implement forward compatibility correctly and refuse to
-     * talk to TLS 1.1 or TLS 1.2 clients. For interoperability, SunJSSE does
-     * not enable TLS 1.1 or TLS 1.2 by default for client connections.
-     */
-    private static final String SSL_CONTEXT_PROTOCOL = "TLSv1.2";
-    /**
-     * {@link SSLContext}: Every implementation of the Java platform is required
-     * to support the following standard SSLContext protocol: TLSv1
-     */
-    private static final String SSL_CONTEXT_FALLBACK_PROTOCOL = "TLSv1";
+    private static final String TLSV_1_3 = "TLSv1.3";
+    private static final String TLSV_1_2 = "TLSv1.2";
 
     private CertificateHelper() {}
 
-    public static KeyPair generateKeyPair(int keySize)
-            throws NoSuchAlgorithmException, NoSuchProviderException {
-        KeyPairGenerator generator = KeyPairGenerator
-                .getInstance(KEYGEN_ALGORITHM/* , PROVIDER_NAME */);
-        SecureRandom secureRandom = SecureRandom
-                .getInstance(SECURE_RANDOM_ALGORITHM/* , PROVIDER_NAME */);
-        generator.initialize(keySize, secureRandom);
+    public static KeyPair generateKeyPair(int keySize) {
+        KeyPairGenerator generator = null;
+        try {
+            generator = KeyPairGenerator.getInstance(KEYGEN_ALGORITHM);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(String.format("Key generation algorithm ''%s not supported.", KEYGEN_ALGORITHM), e);
+        }
+        generator.initialize(keySize, new SecureRandom());
         return generator.generateKeyPair();
     }
 
-    /**
-     * Uses the non-portable system property sun.arch.data.model to help
-     * determine if we are running on a 32-bit JVM. Since the majority of modern
-     * systems are 64 bits, this method "assumes" 64 bits and only returns true
-     * if sun.arch.data.model explicitly indicates a 32-bit JVM.
-     *
-     * @return true if we can determine definitively that this is a 32-bit JVM,
-     *         otherwise false
-     */
-    private static boolean is32BitJvm() {
-        Integer bits = Integer.getInteger("sun.arch.data.model");
-        return bits != null && bits == 32;
-    }
-
     public static KeyStore createRootCertificate(Authority authority,
-            String keyStoreType) throws NoSuchAlgorithmException,
-            NoSuchProviderException, IOException,
-            OperatorCreationException, CertificateException, KeyStoreException {
+            String keyStoreType)  {
+        try {
+            KeyPair keyPair = generateKeyPair(ROOT_KEYSIZE);
+            X500NameBuilder nameBuilder = new X500NameBuilder(BCStyle.INSTANCE);
+            nameBuilder.addRDN(BCStyle.CN, authority.getCommonName());
+            nameBuilder.addRDN(BCStyle.O, authority.getOrganization());
+            nameBuilder.addRDN(BCStyle.OU, authority.getCertOrganization());
 
-        KeyPair keyPair = generateKeyPair(ROOT_KEYSIZE);
+            X500Name issuer = nameBuilder.build();
+            BigInteger serial = BigInteger.valueOf(initRandomSerial());
+            X500Name subject = issuer;
+            PublicKey pubKey = keyPair.getPublic();
 
-        X500NameBuilder nameBuilder = new X500NameBuilder(BCStyle.INSTANCE);
-        nameBuilder.addRDN(BCStyle.CN, authority.commonName());
-        nameBuilder.addRDN(BCStyle.O, authority.organization());
-        nameBuilder.addRDN(BCStyle.OU, authority.organizationalUnitName());
+            X509v3CertificateBuilder generator = new JcaX509v3CertificateBuilder(
+                    issuer, serial, NOT_BEFORE, NOT_AFTER, subject, pubKey);
 
-        X500Name issuer = nameBuilder.build();
-        BigInteger serial = BigInteger.valueOf(initRandomSerial());
-        X500Name subject = issuer;
-        PublicKey pubKey = keyPair.getPublic();
+            generator.addExtension(Extension.subjectKeyIdentifier, false,
+                    createSubjectKeyIdentifier(pubKey));
+            generator.addExtension(Extension.basicConstraints, true,
+                    new BasicConstraints(true));
 
-        X509v3CertificateBuilder generator = new JcaX509v3CertificateBuilder(
-                issuer, serial, NOT_BEFORE, NOT_AFTER, subject, pubKey);
+            KeyUsage usage = new KeyUsage(KeyUsage.keyCertSign
+                    | KeyUsage.digitalSignature | KeyUsage.keyEncipherment
+                    | KeyUsage.dataEncipherment | KeyUsage.cRLSign);
+            generator.addExtension(Extension.keyUsage, false, usage);
 
-        generator.addExtension(Extension.subjectKeyIdentifier, false,
-                createSubjectKeyIdentifier(pubKey));
-        generator.addExtension(Extension.basicConstraints, true,
-                new BasicConstraints(true));
+            ASN1EncodableVector purposes = new ASN1EncodableVector();
+            purposes.add(KeyPurposeId.id_kp_serverAuth);
+            purposes.add(KeyPurposeId.id_kp_clientAuth);
+            purposes.add(KeyPurposeId.anyExtendedKeyUsage);
+            generator.addExtension(Extension.extendedKeyUsage, false,
+                    new DERSequence(purposes));
 
-        KeyUsage usage = new KeyUsage(KeyUsage.keyCertSign
-                | KeyUsage.digitalSignature | KeyUsage.keyEncipherment
-                | KeyUsage.dataEncipherment | KeyUsage.cRLSign);
-        generator.addExtension(Extension.keyUsage, false, usage);
+            X509Certificate cert = signCertificate(generator, keyPair.getPrivate());
 
-        ASN1EncodableVector purposes = new ASN1EncodableVector();
-        purposes.add(KeyPurposeId.id_kp_serverAuth);
-        purposes.add(KeyPurposeId.id_kp_clientAuth);
-        purposes.add(KeyPurposeId.anyExtendedKeyUsage);
-        generator.addExtension(Extension.extendedKeyUsage, false,
-                new DERSequence(purposes));
-
-        X509Certificate cert = signCertificate(generator, keyPair.getPrivate());
-
-        KeyStore result = KeyStore
-                .getInstance(keyStoreType/* , PROVIDER_NAME */);
-        result.load(null, null);
-        result.setKeyEntry(authority.alias(), keyPair.getPrivate(),
-                authority.password(), new Certificate[] { cert });
-        return result;
+            KeyStore result = KeyStore.getInstance(keyStoreType, BC_PROVIDER);
+            result.load(null, null);
+            result.setKeyEntry(authority.getAlias(), keyPair.getPrivate(),
+                    authority.getPassword(), new Certificate[]{cert});
+            return result;
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create root certificate.", e);
+        }
     }
 
-    private static SubjectKeyIdentifier createSubjectKeyIdentifier(Key key)
-            throws IOException {
+    private static SubjectKeyIdentifier createSubjectKeyIdentifier(Key key) {
         ByteArrayInputStream bIn = new ByteArrayInputStream(key.getEncoded());
-        ASN1InputStream is = null;
         try {
-            is = new ASN1InputStream(bIn);
-            ASN1Sequence seq = (ASN1Sequence) is.readObject();
-            SubjectPublicKeyInfo info = new SubjectPublicKeyInfo(seq);
-            return new BcX509ExtensionUtils().createSubjectKeyIdentifier(info);
-        } finally {
-            IOUtils.closeQuietly(is);
+            try (ASN1InputStream is = new ASN1InputStream(bIn)) {
+                ASN1Sequence seq = (ASN1Sequence) is.readObject();
+                SubjectPublicKeyInfo info = SubjectPublicKeyInfo.getInstance(seq);
+                return new BcX509ExtensionUtils().createSubjectKeyIdentifier(info);
+            }
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create subject key identifier.", e);
         }
     }
 
     public static KeyStore createServerCertificate(String commonName,
             SubjectAlternativeNameHolder subjectAlternativeNames,
-            Authority authority, Certificate caCert, PrivateKey caPrivKey)
-            throws NoSuchAlgorithmException, NoSuchProviderException,
-            IOException, OperatorCreationException, CertificateException,
-            InvalidKeyException, SignatureException, KeyStoreException {
+            Authority authority, Certificate caCert, PrivateKey caPrivKey) {
 
-        KeyPair keyPair = generateKeyPair(FAKE_KEYSIZE);
+        try {
+            KeyPair keyPair = generateKeyPair(FAKE_KEYSIZE);
 
-        X500Name issuer = new X509CertificateHolder(caCert.getEncoded())
-                .getSubject();
-        BigInteger serial = BigInteger.valueOf(initRandomSerial());
+            X500Name issuer = new X509CertificateHolder(caCert.getEncoded())
+                    .getSubject();
+            BigInteger serial = BigInteger.valueOf(initRandomSerial());
 
-        X500NameBuilder name = new X500NameBuilder(BCStyle.INSTANCE);
-        name.addRDN(BCStyle.CN, commonName);
-        name.addRDN(BCStyle.O, authority.certOrganisation());
-        name.addRDN(BCStyle.OU, authority.certOrganizationalUnitName());
-        X500Name subject = name.build();
+            X500NameBuilder name = new X500NameBuilder(BCStyle.INSTANCE);
+            name.addRDN(BCStyle.CN, commonName);
+            name.addRDN(BCStyle.O, authority.getCertOrganization());
+            name.addRDN(BCStyle.OU, authority.getCertOrganizationalUnitName());
+            X500Name subject = name.build();
 
-        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(issuer, serial, NOT_BEFORE,
-                new Date(System.currentTimeMillis() + ONE_DAY), subject, keyPair.getPublic());
+            X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(issuer, serial, NOT_BEFORE,
+                    new Date(System.currentTimeMillis() + ONE_DAY), subject, keyPair.getPublic());
 
-        builder.addExtension(Extension.subjectKeyIdentifier, false,
-                createSubjectKeyIdentifier(keyPair.getPublic()));
-        builder.addExtension(Extension.basicConstraints, false,
-                new BasicConstraints(false));
+            builder.addExtension(Extension.subjectKeyIdentifier, false,
+                    createSubjectKeyIdentifier(keyPair.getPublic()));
+            builder.addExtension(Extension.basicConstraints, false,
+                    new BasicConstraints(false));
 
-        subjectAlternativeNames.fillInto(builder);
+            subjectAlternativeNames.fillInto(builder);
 
-        X509Certificate cert = signCertificate(builder, caPrivKey);
+            X509Certificate cert = signCertificate(builder, caPrivKey);
 
-        cert.checkValidity(new Date());
-        cert.verify(caCert.getPublicKey());
+            cert.checkValidity(new Date());
+            cert.verify(caCert.getPublicKey());
 
-        KeyStore result = KeyStore.getInstance(KeyStore.getDefaultType()
-        /* , PROVIDER_NAME */);
-        result.load(null, null);
-        Certificate[] chain = { cert, caCert };
-        result.setKeyEntry(authority.alias(), keyPair.getPrivate(),
-                authority.password(), chain);
+            KeyStore result = KeyStore.getInstance("PKCS12", BC_PROVIDER);
+            result.load(null, null);
+            Certificate[] chain = {cert, caCert};
+            result.setKeyEntry(authority.getAlias(), keyPair.getPrivate(),
+                    authority.getPassword(), chain);
 
-        return result;
+            return result;
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create server certificate.", e);
+        }
     }
 
     private static X509Certificate signCertificate(
             X509v3CertificateBuilder certificateBuilder,
-            PrivateKey signedWithPrivateKey) throws OperatorCreationException,
-            CertificateException {
-        ContentSigner signer = new JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-                .setProvider(PROVIDER_NAME).build(signedWithPrivateKey);
-        return new JcaX509CertificateConverter().setProvider(
-                PROVIDER_NAME).getCertificate(certificateBuilder.build(signer));
-    }
-
-    public static TrustManager[] getTrustManagers(KeyStore keyStore)
-            throws KeyStoreException, NoSuchAlgorithmException,
-            NoSuchProviderException {
-        String trustManAlg = TrustManagerFactory.getDefaultAlgorithm();
-        TrustManagerFactory tmf = TrustManagerFactory.getInstance(trustManAlg
-        /* , PROVIDER_NAME */);
-        tmf.init(keyStore);
-        return tmf.getTrustManagers();
+            PrivateKey signedWithPrivateKey)  {
+        try {
+            ContentSigner signer = new JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
+                    .setProvider(BC_PROVIDER).build(signedWithPrivateKey);
+            return new JcaX509CertificateConverter().setProvider(
+                    BC_PROVIDER).getCertificate(certificateBuilder.build(signer));
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not sign certificate.", e);
+        }
     }
 
     public static KeyManager[] getKeyManagers(KeyStore keyStore,
-            Authority authority) throws NoSuchAlgorithmException,
-            NoSuchProviderException, UnrecoverableKeyException,
-            KeyStoreException {
-        String keyManAlg = KeyManagerFactory.getDefaultAlgorithm();
-        KeyManagerFactory kmf = KeyManagerFactory.getInstance(keyManAlg
-        /* , PROVIDER_NAME */);
-        kmf.init(keyStore, authority.password());
-        return kmf.getKeyManagers();
+            Authority authority) {
+        try {
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(keyStore, authority.getPassword());
+            return kmf.getKeyManagers();
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create key manager.", e);
+        }
     }
 
     public static SSLContext newClientContext(KeyManager[] keyManagers,
-            TrustManager[] trustManagers) throws NoSuchAlgorithmException,
-            KeyManagementException, NoSuchProviderException {
-        SSLContext result = newSSLContext();
-        result.init(keyManagers, trustManagers, null);
-        return result;
-    }
-
-    public static SSLContext newServerContext(KeyManager[] keyManagers)
-            throws NoSuchAlgorithmException, NoSuchProviderException,
-            KeyManagementException {
-        SSLContext result = newSSLContext();
-        SecureRandom random = new SecureRandom();
-        random.setSeed(System.currentTimeMillis());
-        result.init(keyManagers, null, random);
-        return result;
-    }
-
-    private static SSLContext newSSLContext() throws NoSuchAlgorithmException {
+            TrustManager[] trustManagers) {
         try {
-            log.debug("Using protocol {}", SSL_CONTEXT_PROTOCOL);
-            return SSLContext.getInstance(SSL_CONTEXT_PROTOCOL
-            /* , PROVIDER_NAME */);
+            SSLContext result = newSSLContext();
+            result.init(keyManagers, trustManagers, new SecureRandom());
+            return result;
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create key manager.", e);
+        }
+    }
+
+    public static SSLContext newServerContext(KeyManager[] keyManagers) {
+        try {
+            SSLContext result = newSSLContext();
+            SecureRandom random = new SecureRandom();
+            result.init(keyManagers, null, random);
+            return result;
+        }
+        catch (Exception e) {
+            throw new RuntimeException("Could not create SSL context.", e);
+        }
+    }
+
+    private static boolean isAndroid() {
+        try {
+            Class.forName("android.content.Context");
+            return true;
+        }
+        catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    private static SSLContext newSSLContext() {
+        try {
+            log.debug("Using protocol {}", TLSV_1_3);
+            if (isAndroid()) {
+                return SSLContext.getInstance(TLSV_1_3);
+            }
+            return SSLContext.getInstance(TLSV_1_3, org.conscrypt.Conscrypt.newProvider());
         } catch (NoSuchAlgorithmException e) {
-            log.warn("Protocol {} not available, falling back to {}", SSL_CONTEXT_PROTOCOL,
-                    SSL_CONTEXT_FALLBACK_PROTOCOL);
-            return SSLContext.getInstance(SSL_CONTEXT_FALLBACK_PROTOCOL
-            /* , PROVIDER_NAME */);
+            log.debug("Protocol {} not available, falling back to {}", TLSV_1_3, TLSV_1_2);
+            try {
+                log.debug("Using protocol {}", TLSV_1_2);
+                if (isAndroid()) {
+                    return SSLContext.getInstance(TLSV_1_2);
+                }
+                return SSLContext.getInstance(TLSV_1_2, org.conscrypt.Conscrypt.newProvider());
+            } catch (NoSuchAlgorithmException e2) {
+                throw new RuntimeException(String.format("TLS protocol %s not available", TLSV_1_2), e2);
+            }
         }
     }
 

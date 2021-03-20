@@ -3,7 +3,7 @@ package de.ganskef.test;
 import java.io.File;
 
 import org.littleshoot.proxy.mitm.Authority;
-import org.littleshoot.proxy.mitm.BouncyCastleSslEngineSource;
+import org.littleshoot.proxy.mitm.MitmSslEngineSource;
 import org.littleshoot.proxy.mitm.SubjectAlternativeNameHolder;
 
 public class TrustedServer extends SecureServer {
@@ -20,8 +20,8 @@ public class TrustedServer extends SecureServer {
     }
 
     public Server start() throws Exception {
-        BouncyCastleSslEngineSource es = new BouncyCastleSslEngineSource(
-                new Authority(), true, true);
+        MitmSslEngineSource es = new MitmSslEngineSource(
+                new Authority(), true, null, null);
         SubjectAlternativeNameHolder san = new SubjectAlternativeNameHolder();
         // san.addDomainName("localhost");
         es.initializeServerCertificates(commonName, san);

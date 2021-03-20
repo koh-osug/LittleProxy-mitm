@@ -22,14 +22,14 @@ public class Launcher {
         try {
             final int port = 9090;
 
-            System.out.println("About to start server on port: " + port);
+            log.info("About to start server on port: " + port);
             HttpProxyServerBootstrap bootstrap = DefaultHttpProxyServer
                     .bootstrapFromFile("./littleproxy.properties")
                     .withPort(port).withAllowLocalOnly(false);
 
             bootstrap.withManInTheMiddle(new CertificateSniffingMitmManager());
 
-            System.out.println("About to start...");
+            log.info("About to start...");
             bootstrap.start();
 
         } catch (Exception e) {

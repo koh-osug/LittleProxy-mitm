@@ -1,8 +1,10 @@
 package org.littleshoot.proxy.mitm;
 
+import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
@@ -22,17 +24,17 @@ public class CertificateSniffingMitmManager implements MitmManager {
     private static final Logger LOG = LoggerFactory
             .getLogger(CertificateSniffingMitmManager.class);
 
-    private BouncyCastleSslEngineSource sslEngineSource;
+    private MitmSslEngineSource sslEngineSource;
 
     public CertificateSniffingMitmManager() throws RootCertificateException {
-        this(new Authority());
+        this(new Authority(), null, null);
     }
 
-    public CertificateSniffingMitmManager(Authority authority)
+    public CertificateSniffingMitmManager(Authority authority, KeyManagerFactory kmf, KeyStore additionalTrustStore)
             throws RootCertificateException {
         try {
-            sslEngineSource = new BouncyCastleSslEngineSource(authority, true,
-                    true);
+            sslEngineSource = new MitmSslEngineSource(authority, true,
+                    kmf, additionalTrustStore);
         } catch (final Exception e) {
             throw new RootCertificateException(
                     "Errors during assembling root CA.", e);
