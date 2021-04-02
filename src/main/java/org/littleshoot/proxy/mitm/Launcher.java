@@ -3,6 +3,7 @@ package org.littleshoot.proxy.mitm;
 import java.io.File;
 
 import org.apache.log4j.xml.DOMConfigurator;
+import org.littleshoot.proxy.HttpProxyServer;
 import org.littleshoot.proxy.HttpProxyServerBootstrap;
 import org.littleshoot.proxy.impl.DefaultHttpProxyServer;
 import org.slf4j.Logger;
@@ -30,8 +31,10 @@ public class Launcher {
             bootstrap.withManInTheMiddle(new CertificateSniffingMitmManager());
 
             log.info("About to start...");
-            bootstrap.start();
-
+            HttpProxyServer server = bootstrap.start();
+            while (true) {
+                Thread.yield();
+            }
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             System.exit(1);
