@@ -12,7 +12,6 @@ dependencies {
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.68'
     implementation 'org.bouncycastle:bcpkix-jdk15to18:1.68'
     implementation 'org.conscrypt:conscrypt-openjdk-uber:2.5.1'
-    implementation 'commons-io:commons-io:2.8.0'
     api('xyz.rogfam:littleproxy:2.0.3') {
         exclude group: 'com.barchart.udt', module: 'barchart-udt-bundle'
     }
@@ -21,6 +20,7 @@ dependencies {
         exclude group: 'io.netty', module: 'netty-tcnative'
         exclude group: 'org.bouncycastle', module: 'bcprov-jdk15on'
     }
+    testImplementation 'commons-io:commons-io:2.8.0'
     testImplementation('junit:junit:4.13.2')
     compileOnly 'org.projectlombok:lombok:1.18.12'
     annotationProcessor 'org.projectlombok:lombok:1.18.12'
