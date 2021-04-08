@@ -14,7 +14,9 @@ dependencies {
     implementation 'org.conscrypt:conscrypt-openjdk-uber:2.5.1'
     api('xyz.rogfam:littleproxy:2.0.3') {
         exclude group: 'com.barchart.udt', module: 'barchart-udt-bundle'
+        exclude group: 'io.netty:', module: 'netty-all'
     }
+    implementation('io.netty:netty-all:4.1.60.Final')
     implementation 'org.slf4j:slf4j-log4j12:1.7.30'
     testImplementation('io.netty:netty-example:4.1.60.Final') {
         exclude group: 'io.netty', module: 'netty-tcnative'
